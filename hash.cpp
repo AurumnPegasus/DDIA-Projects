@@ -10,20 +10,33 @@ using namespace std;
 // constant across compilers (ll gives gaurantee of atleast 64 bits)
 // but could be more.
 using ii = int64_t;
-unordered_map<ii, ii> hash_table;
 
-string fname = "segment";
+const ii MAX_SEGMENT_SIZE = 10;
+
+struct RecordLocation {
+    string filename;
+    ii offset;
+};
+
+unordered_map<ii, RecordLocation> hash_table;
+string segment_name = "segment";
+int segment_number = 0;
+int current_entries = 0;
+
+string get_active_segment() {
+    return segment_name + to_string(segment_number);
+}
 
 void read() {
     ii key;
     cin >> key;
     if (hash_table.find(key) != hash_table.end()) {
-        ii offset = hash_table[key];
-        ifstream fin(fname, ios::binary);
-        fin.seekg(offset, ios::beg);
+        RecordLocation loc = hash_table[key];
+        ifstream fin(loc.filename, ios::binary);
+        fin.seekg(loc.offset, ios::beg);
         string line;
         getline(fin, line);
-        int pos = line.find(';');
+        size_t pos = line.find(';');
         cout << line << "\n";
         cout << line.substr(pos + 1) << "\n";
     }
@@ -42,10 +55,11 @@ void write() {
     // Data read in from a binary stream always equal the
     // data that were earlier written out to that stream
     // https://en.cppreference.com/cpp/io/c/FILE#Binary_and_text_modes
-    ofstream fout(fname, ios::app | ios::binary);
+    ofstream fout(get_active_segment(), ios::app | ios::binary);
     ii pre_offset = fout.tellp();
     fout << key << ";" << value << "\n";
-    hash_table[key] = pre_offset;
+    hash_table[key] = {get_active_segment(), pre_offset};
+    current_entries++;
     return;
 }
 
@@ -59,9 +73,10 @@ void delete_entry() {
     ii key;
     cin >> key;
     if (hash_table.find(key) != hash_table.end()) {
-        ofstream fout(fname, ios::app | ios::binary);
+        ofstream fout(get_active_segment(), ios::app | ios::binary);
         fout << key << ";" << "DEAD" << "\n";
         hash_table.erase(key);
+        current_entries++;
     }
     return;
 }
@@ -94,6 +109,11 @@ void input_loop(void) {
                 return;
             default:
                 cout << "Invalid choice \n";
+        }
+
+        if (current_entries >= MAX_SEGMENT_SIZE) {
+            segment_number++;
+            current_entries = 0;
         }
     }
 
