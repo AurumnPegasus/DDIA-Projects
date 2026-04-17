@@ -1,0 +1,54 @@
+# Editor / tooling
+.clangd
+.zed/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled binaries / objects
+a
+a.out
+*.o
+*.obj
+*.out
+*.exe
+*.app
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+hash
+
+# Debug info
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# DB artifacts
+segment
+segment.*
+*.db
+*.log
+*.sst
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
