@@ -1,6 +1,6 @@
 #include <iostream>
 #include <fstream>
-#include <map>
+#include <unordered_map>
 #include <string>
 #include <cstdint>
 
@@ -10,11 +10,23 @@ using namespace std;
 // constant across compilers (ll gives gaurantee of atleast 64 bits)
 // but could be more.
 using ii = int64_t;
-map<ii, ii> hash_table;
+unordered_map<ii, ii> hash_table;
 
 string fname = "segment";
 
 void read() {
+    ii key;
+    cin >> key;
+    if (hash_table.find(key) != hash_table.end()) {
+        ii offset = hash_table[key];
+        ifstream fin(fname, ios::binary);
+        fin.seekg(offset, ios::beg);
+        string line;
+        getline(fin, line);
+        int pos = line.find(';');
+        cout << line << "\n";
+        cout << line.substr(pos + 1) << "\n";
+    }
     return;
 }
 
@@ -24,16 +36,33 @@ void write() {
     cin >> key;
     cin.ignore(); // eat the space left after key
     getline(cin, value); // read untill \n, spaces included.
-    ofstream fout(fname);
-    fout << key << ";" << value << endl;
+
+    // why binary and not text stream? text stream processes \n
+    // this will mess up with the offsets.
+    // Data read in from a binary stream always equal the
+    // data that were earlier written out to that stream
+    // https://en.cppreference.com/cpp/io/c/FILE#Binary_and_text_modes
+    ofstream fout(fname, ios::app | ios::binary);
+    ii pre_offset = fout.tellp();
+    fout << key << ";" << value << "\n";
+    hash_table[key] = pre_offset;
     return;
 }
 
 void update() {
+    // is the same as write
+    write();
     return;
 }
 
 void delete_entry() {
+    ii key;
+    cin >> key;
+    if (hash_table.find(key) != hash_table.end()) {
+        ofstream fout(fname, ios::app | ios::binary);
+        fout << key << ";" << "DEAD" << "\n";
+        hash_table.erase(key);
+    }
     return;
 }
 
