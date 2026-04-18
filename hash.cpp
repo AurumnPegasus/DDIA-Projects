@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <string>
 #include <cstdint>
+#include <filesystem>
 
 using namespace std;
 
@@ -25,6 +26,109 @@ int current_entries = 0;
 
 string get_active_segment() {
     return segment_name + to_string(segment_number);
+}
+
+int find_latest_segment_num() {
+    int latest = -1;
+
+    for (const auto& entry : filesystem::directory_iterator(".")) {
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+
+        string filename = entry.path().filename().string();
+
+        if (filename.rfind(segment_name, 0) != 0) {
+            continue;
+        }
+
+        string suffix = filename.substr(segment_name.size());
+
+        if (suffix.empty()) {
+            continue;
+        }
+
+        bool only_digits = true;
+        for (char ch : suffix) {
+            if (ch < '0' || ch > '9') {
+                only_digits = false;
+                break;
+            }
+        }
+
+        if (!only_digits) {
+            continue;
+        }
+
+        int segment_num = stoi(suffix);
+        if (segment_num > latest) {
+            latest = segment_num;
+        }
+    }
+
+    return latest;
+}
+
+unordered_map<ii, RecordLocation> reconstruct_map() {
+    unordered_map<ii, RecordLocation> temp_table;
+    int latest_segment_num = find_latest_segment_num();
+
+    if (latest_segment_num == -1) {
+        segment_number = 0;
+        return temp_table;
+    }
+
+    segment_number = latest_segment_num;
+
+    for (int temp = 0; temp <= latest_segment_num; temp++) {
+        string segname = segment_name + to_string(temp);
+        ifstream fin(segname, ios::binary);
+        if (fin) {
+            string line;
+            while(true) {
+                ii offset = fin.tellg();
+                if(!getline(fin, line)) {
+                    break;
+                }
+                size_t pos = line.find(";");
+                if (pos != string::npos) {
+                    ii key = stoll(line.substr(0, pos));
+                    string value = line.substr(pos+1);
+                    if (value.compare("DEAD") == 0) {
+                        temp_table.erase(key);
+                    } else {
+                        temp_table[key] = {segname, offset};
+                    }
+                }
+            }
+        }
+    }
+
+    return temp_table;
+}
+
+void compact_segments() {
+    unordered_map<ii, RecordLocation> temp_table = reconstruct_map();
+    string fname = "new_segment" + to_string(0);
+    string compacted_fname = segment_name + to_string(0);
+    ofstream fout(fname, ios::binary);
+    for (auto& entry : temp_table) {
+        string ifname = entry.second.filename;
+        ii ioffset = entry.second.offset;
+        ifstream fin(ifname, ios::binary);
+        fin.seekg(ioffset, ios::beg);
+        string line;
+        getline(fin, line);
+        ii pre_offset = fout.tellp();
+        fout << line << "\n";
+        hash_table[entry.first] = {compacted_fname, pre_offset};
+    }
+    for(int i=0;i<segment_number;i++) {
+        filesystem::remove("segment" + to_string(i));
+    }
+    filesystem::rename(fname, "segment" + to_string(0));
+    filesystem::rename(get_active_segment(), "segment" + to_string(1));
+    segment_number = 1;
 }
 
 void read() {
@@ -120,6 +224,7 @@ void input_loop(void) {
 }
 
 int main (void) {
+    compact_segments();
     input_loop();
     return 0;
 }
