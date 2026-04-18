@@ -13,6 +13,7 @@ using namespace std;
 using ii = int64_t;
 
 const ii MAX_SEGMENT_SIZE = 10;
+const ii COMPACT_AFTER_SEGMENTS = 10;
 
 struct RecordLocation {
     string filename;
@@ -123,12 +124,17 @@ void compact_segments() {
         fout << line << "\n";
         hash_table[entry.first] = {compacted_fname, pre_offset};
     }
-    for(int i=0;i<segment_number;i++) {
+    fout.close();
+
+    for(int i=0;i<=segment_number;i++) {
         filesystem::remove("segment" + to_string(i));
     }
     filesystem::rename(fname, "segment" + to_string(0));
-    filesystem::rename(get_active_segment(), "segment" + to_string(1));
     segment_number = 1;
+    current_entries = 0;
+
+    ofstream active_segment(get_active_segment(), ios::app | ios::binary);
+    active_segment.close();
 }
 
 void read() {
@@ -216,15 +222,19 @@ void input_loop(void) {
         }
 
         if (current_entries >= MAX_SEGMENT_SIZE) {
-            segment_number++;
-            current_entries = 0;
+            if (segment_number + 1 >= COMPACT_AFTER_SEGMENTS) {
+                compact_segments();
+            } else {
+                segment_number++;
+                current_entries = 0;
+            }
         }
     }
 
 }
 
 int main (void) {
-    compact_segments();
+    hash_table = reconstruct_map();
     input_loop();
     return 0;
 }
