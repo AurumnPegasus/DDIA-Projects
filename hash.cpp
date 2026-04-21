@@ -4,6 +4,11 @@
 #include <string>
 #include <cstdint>
 #include <filesystem>
+#include <queue>
+#include <mutex>
+#include <utility>
+#include <condition_variable>
+#include <thread>
 
 using namespace std;
 
@@ -14,6 +19,8 @@ using ii = int64_t;
 
 const ii MAX_SEGMENT_SIZE = 10;
 const ii COMPACT_AFTER_SEGMENTS = 10;
+
+
 
 struct RecordLocation {
     string filename;
@@ -153,13 +160,7 @@ void read() {
     return;
 }
 
-void write() {
-    ii key;
-    string value;
-    cin >> key;
-    cin.ignore(); // eat the space left after key
-    getline(cin, value); // read untill \n, spaces included.
-
+void write(ii key, string value) {
     // why binary and not text stream? text stream processes \n
     // this will mess up with the offsets.
     // Data read in from a binary stream always equal the
@@ -173,15 +174,13 @@ void write() {
     return;
 }
 
-void update() {
+void update(ii key, string value) {
     // is the same as write
-    write();
+    write(key, value);
     return;
 }
 
-void delete_entry() {
-    ii key;
-    cin >> key;
+void delete_entry(ii key) {
     if (hash_table.find(key) != hash_table.end()) {
         ofstream fout(get_active_segment(), ios::app | ios::binary);
         fout << key << ";" << "DEAD" << "\n";
@@ -191,8 +190,70 @@ void delete_entry() {
     return;
 }
 
-void input_loop(void) {
+struct WriteRequest {
+    ii key;
+    string value;
+};
 
+class WriteQueue {
+    queue<WriteRequest> write_queue;
+    mutex mtx; // lock needed to modify write_queue
+    condition_variable cv; // polling var, set => new request available.
+    bool stop = false;
+
+public:
+    void push (WriteRequest req) {
+        {
+            lock_guard<mutex> lock(mtx); // mutex lives between these brackets.
+            write_queue.push(std::move(req));
+            // move over push to avoid copying, instead use reference semantics.
+        }
+        cv.notify_one(); // cv tells writer thread that new request is available.
+    }
+
+    void run() {
+        WriteRequest req;
+        while(true) {
+            {
+                unique_lock<mutex> lock(mtx); // acquire the lock
+                cv.wait(lock, [&] { return !write_queue.empty() || stop; });
+                // wait => sleep till you get cv trigger
+                // lock => its passed so that cv can give up the lock when its sleeping, and request when its awake.
+                if (stop && write_queue.empty()) return;
+                req = std::move(write_queue.front());
+                write_queue.pop();
+            }
+            if (req.value == "DEAD") {
+                delete_entry(req.key);
+            } else {
+                write(req.key, req.value);
+            }
+
+            if (current_entries >= MAX_SEGMENT_SIZE) {
+                if (segment_number + 1 >= COMPACT_AFTER_SEGMENTS) {
+                    compact_segments();
+                } else {
+                    segment_number++;
+                    current_entries = 0;
+                }
+            }
+        }
+    }
+
+    void shutdown() {
+        // shutdown so that if program ends but cv is sleeping
+        // so clean handling of shutting down stuff;
+        {
+            lock_guard<mutex> lock(mtx);
+            stop = true;
+        }
+        cv.notify_one();
+    }
+};
+
+void input_loop(WriteQueue &wq) {
+    ii key;
+    string value;
     while(true) {
         int choice;
         cout << "1. Read \n";
@@ -207,34 +268,37 @@ void input_loop(void) {
                 read();
                 break;
             case 2:
-                write();
+                cin >> key;
+                cin.ignore(); // eat the space left after key
+                getline(cin, value); // read untill \n, spaces included.
+                wq.push(WriteRequest({key, value}));
                 break;
             case 3:
-                update();
+                cin >> key;
+                cin.ignore(); // eat the space left after key
+                getline(cin, value); // read untill \n, spaces included.
+                wq.push(WriteRequest({key, value}));
                 break;
             case 4:
-                delete_entry();
+                cin >> key;
+                cin.ignore();
+                wq.push(WriteRequest({key, "DEAD"}));
                 break;
             case 5:
                 return;
             default:
                 cout << "Invalid choice \n";
         }
-
-        if (current_entries >= MAX_SEGMENT_SIZE) {
-            if (segment_number + 1 >= COMPACT_AFTER_SEGMENTS) {
-                compact_segments();
-            } else {
-                segment_number++;
-                current_entries = 0;
-            }
-        }
     }
 
 }
 
 int main (void) {
+    WriteQueue wq;
+    std::thread writer(&WriteQueue::run, &wq);
     hash_table = reconstruct_map();
-    input_loop();
+    input_loop(wq);
+    wq.shutdown();
+    writer.join();
     return 0;
 }
