@@ -6,10 +6,11 @@
 #include <filesystem>
 #include <queue>
 #include <mutex>
+#include <shared_mutex>
 #include <utility>
 #include <condition_variable>
 #include <thread>
-
+#include <future>
 using namespace std;
 
 // int64_t instead of long long since this is
@@ -19,8 +20,7 @@ using ii = int64_t;
 
 const ii MAX_SEGMENT_SIZE = 10;
 const ii COMPACT_AFTER_SEGMENTS = 10;
-
-
+shared_mutex rw_mtx;
 
 struct RecordLocation {
     string filename;
@@ -120,6 +120,7 @@ void compact_segments() {
     string fname = "new_segment" + to_string(0);
     string compacted_fname = segment_name + to_string(0);
     ofstream fout(fname, ios::binary);
+    unique_lock lock(rw_mtx);
     for (auto& entry : temp_table) {
         string ifname = entry.second.filename;
         ii ioffset = entry.second.offset;
@@ -147,6 +148,7 @@ void compact_segments() {
 void read() {
     ii key;
     cin >> key;
+    shared_lock lock(rw_mtx);
     if (hash_table.find(key) != hash_table.end()) {
         RecordLocation loc = hash_table[key];
         ifstream fin(loc.filename, ios::binary);
@@ -169,6 +171,7 @@ void write(ii key, string value) {
     ofstream fout(get_active_segment(), ios::app | ios::binary);
     ii pre_offset = fout.tellp();
     fout << key << ";" << value << "\n";
+    unique_lock lock(rw_mtx);
     hash_table[key] = {get_active_segment(), pre_offset};
     current_entries++;
     return;
@@ -181,6 +184,7 @@ void update(ii key, string value) {
 }
 
 void delete_entry(ii key) {
+    unique_lock lock(rw_mtx);
     if (hash_table.find(key) != hash_table.end()) {
         ofstream fout(get_active_segment(), ios::app | ios::binary);
         fout << key << ";" << "DEAD" << "\n";
@@ -193,6 +197,7 @@ void delete_entry(ii key) {
 struct WriteRequest {
     ii key;
     string value;
+    promise<bool> p;
 };
 
 class WriteQueue {
@@ -228,6 +233,7 @@ public:
             } else {
                 write(req.key, req.value);
             }
+            req.p.set_value(true);
 
             if (current_entries >= MAX_SEGMENT_SIZE) {
                 if (segment_number + 1 >= COMPACT_AFTER_SEGMENTS) {
@@ -267,23 +273,35 @@ void input_loop(WriteQueue &wq) {
             case 1:
                 read();
                 break;
-            case 2:
+            case 2:{
                 cin >> key;
                 cin.ignore(); // eat the space left after key
                 getline(cin, value); // read untill \n, spaces included.
-                wq.push(WriteRequest({key, value}));
+                promise<bool> p;
+                future<bool> f = p.get_future();
+                wq.push(WriteRequest({key, value, std::move(p)}));
+                f.get();
                 break;
-            case 3:
+            }
+            case 3: {
                 cin >> key;
                 cin.ignore(); // eat the space left after key
                 getline(cin, value); // read untill \n, spaces included.
-                wq.push(WriteRequest({key, value}));
+                promise<bool> p;
+                future<bool> f = p.get_future();
+                wq.push(WriteRequest({key, value, std::move(p)}));
+                f.get();
                 break;
-            case 4:
+            }
+            case 4: {
                 cin >> key;
                 cin.ignore();
-                wq.push(WriteRequest({key, "DEAD"}));
+                promise<bool> p;
+                future<bool> f = p.get_future();
+                wq.push(WriteRequest({key, "DEAD", std::move(p)}));
+                f.get();
                 break;
+            }
             case 5:
                 return;
             default:
